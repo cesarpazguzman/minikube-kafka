@@ -73,6 +73,22 @@ spec:
       transaction.state.log.min.isr: 2
       default.replication.factor: 3
       min.insync.replicas: 2
+    # Metrics are off by default. The Strimzi Metrics Reporter exposes Kafka metrics
+    # directly in Prometheus format on port 9404 (container port `tcp-prometheus`),
+    # with no JMX exporter agent in between.
+    #
+    # The allowList is not optional housekeeping: Kafka exposes tens of thousands of
+    # JMX metrics, one set per topic and per partition. Scraping all of them will hurt
+    # Prometheus long before it hurts Kafka. Cardinality is the thing to control.
+    metricsConfig:
+      type: strimziMetricsReporter
+      values:
+        allowList:
+          - "kafka_controller.*"
+          - "kafka_server_replicamanager.*"
+          - "kafka_server_brokertopicmetrics.*"
+          - "kafka_network_requestmetrics.*"
+          - "kafka_log_logmanager.*"
   entityOperator:
     # These two run as a separate pod that watches KafkaTopic and KafkaUser objects
     # and reconciles them against the running cluster.

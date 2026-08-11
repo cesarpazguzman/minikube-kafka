@@ -1,0 +1,32 @@
+# A PodMonitor tells the prometheus-operator "scrape these pods, on this port".
+# You never edit prometheus.yml — the operator generates it from objects like this one.
+# Same model as Strimzi: CRDs plus a reconciliation loop.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: kafka-metrics
+  namespace: monitoring
+spec:
+  # Select the pods by label...
+  selector:
+    matchLabels:
+      strimzi.io/kind: Kafka
+  # ...in this namespace. PodMonitor lives in `monitoring` but targets `kafka`.
+  namespaceSelector:
+    matchNames:
+      - kafka
+  podMetricsEndpoints:
+    - path: /metrics
+      # The container port NAME, not the number — so it keeps working if the port moves.
+      port: tcp-prometheus
+      relabelings:
+        # Promote Strimzi's pod labels (cluster name, broker role, pod name) to metric
+        # labels, so you can filter by broker in a dashboard.
+        - action: labelmap
+          regex: __meta_kubernetes_pod_label_(strimzi_io_.+)
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: kubernetes_pod_name
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node_name
