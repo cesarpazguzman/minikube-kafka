@@ -14,7 +14,7 @@ metadata:
   name: web
   namespace: lab
 spec:
-  replicas: 4
+  replicas: 5
   selector:
     matchLabels: { app: web }
   template:
