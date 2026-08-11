@@ -1,0 +1,49 @@
+# A Namespace, a Deployment and a Service — the three objects you meet first.
+#
+# This file lives under manifests/ because ArgoCD (Block 5) is pointed at that
+# directory: everything in here is meant to be managed by GitOps.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: lab
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: lab
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: web }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports: [{ containerPort: 80 }]
+          # requests = what the scheduler reserves when choosing a node.
+          # limits   = the hard ceiling the kernel enforces at runtime.
+          # Without requests the scheduler assumes ~0 and will happily overcommit a node.
+          resources:
+            requests: { cpu: 50m, memory: 64Mi }
+            limits: { cpu: 200m, memory: 128Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: lab
+spec:
+  # NodePort opens the same port on every node, which is what the kind
+  # extraPortMappings forward to the host. In EKS you would use type: LoadBalancer
+  # (provisions an NLB/ALB) or an Ingress controller instead.
+  type: NodePort
+  selector: { app: web }
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30080

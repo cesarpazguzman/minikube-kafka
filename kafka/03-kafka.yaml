@@ -1,0 +1,96 @@
+# A Kafka cluster declared as data. Note what is NOT here: no StatefulSet, no Services,
+# no ConfigMaps, no PVCs, no init containers. The operator derives all of that.
+#
+# Kafka version pinned to 4.3.0 because that is what this operator supports. Check with:
+#   kubectl get deployment strimzi-cluster-operator -n kafka \
+#     -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="STRIMZI_KAFKA_IMAGES")].value}'
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: dual-role
+  namespace: kafka
+  # This label is how the node pool is bound to its Kafka cluster. Label-based
+  # coupling again — the same pattern as Service -> pod selectors.
+  labels:
+    strimzi.io/cluster: lab-cluster
+spec:
+  replicas: 3
+  # KRaft dual-role: each node is both a metadata controller and a data broker.
+  # ZooKeeper no longer exists in Kafka 4.x. In production you would usually split
+  # these into two pools (3 small controllers + N large brokers) so that scaling
+  # storage does not disturb the metadata quorum.
+  roles:
+    - controller
+    - broker
+  # Pod-level concerns (resources, JVM options, scheduling) belong to the node pool,
+  # not to the Kafka CR — the v1 API enforces that split. Strimzi derives the JVM
+  # heap from the memory limit, so setting one implicitly sets -Xmx.
+  resources:
+    requests: { cpu: 250m, memory: 1Gi }
+    limits: { memory: 1536Mi }
+  storage:
+    # JBOD = "just a bunch of disks": a list of volumes per broker. Even with one
+    # volume, using jbod means you can add more later without recreating the pool.
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: 5Gi
+        # Lab-only. In production this is false, so that deleting the Kafka CR by
+        # accident does not delete the data with it.
+        deleteClaim: true
+---
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: lab-cluster
+  namespace: kafka
+spec:
+  kafka:
+    version: 4.3.0
+    listeners:
+      # "internal" means a ClusterIP Service reachable only inside the cluster.
+      # Exposing Kafka outside would use type: nodeport / loadbalancer / ingress,
+      # and that is where the advertised-listeners problem gets interesting.
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+    config:
+      # These five lines are the durability contract of the cluster.
+      #
+      # default.replication.factor: 3  -> every partition has 3 copies
+      # min.insync.replicas: 2         -> a write is only acknowledged once 2 copies
+      #                                   have it in their log
+      #
+      # Combined with acks=all on the producer, this is what gives RPO ~= 0: losing
+      # one broker loses no acknowledged data. The cluster also stays writable with
+      # one broker down (2 >= min.insync.replicas), but a second failure makes it
+      # read-only rather than silently losing data.
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      default.replication.factor: 3
+      min.insync.replicas: 2
+  entityOperator:
+    # These two run as a separate pod that watches KafkaTopic and KafkaUser objects
+    # and reconciles them against the running cluster.
+    topicOperator: {}
+    userOperator: {}
+---
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: transactions
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: lab-cluster
+spec:
+  # 6 partitions = the unit of parallelism. A consumer group can have at most 6
+  # active consumers on this topic; the 7th would sit idle.
+  partitions: 6
+  replicas: 3
+  config:
+    retention.ms: 604800000 # 7 days
+    cleanup.policy: delete # vs "compact" for changelog/state topics

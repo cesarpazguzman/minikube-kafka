@@ -1,0 +1,42 @@
+# Job and CronJob — the batch primitives, and the closest thing to a data pipeline
+# task that core Kubernetes offers.
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: etl-once
+  namespace: lab
+spec:
+  # A Job runs pods until N of them succeed, then stops. backoffLimit caps the retries
+  # before the Job is marked Failed — without it the default is 6 and a broken task
+  # would retry with exponential backoff for a long time.
+  backoffLimit: 2
+  template:
+    spec:
+      # Never: if the container fails, the Job creates a *new pod* instead of restarting
+      # the container in place. That keeps the failed pod (and its logs) around for
+      # inspection, which is what you want for a data task.
+      restartPolicy: Never
+      containers:
+        - name: etl
+          image: python:3.12-slim
+          command: ["python", "-c"]
+          args: ["import time; print('extracting...'); time.sleep(10); print('done')"]
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: compaction
+  namespace: lab
+spec:
+  # Standard cron syntax. Every 2 minutes here only so the lab shows results quickly.
+  schedule: "*/2 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: compact
+              image: python:3.12-slim
+              command: ["python", "-c", "print('rewrite_data_files()')"]

@@ -1,0 +1,43 @@
+# A Spark job declared as a Kubernetes object.
+#
+# Note that Spark does not need this operator: since Spark 2.3, `spark-submit
+# --master k8s://...` creates the pods by itself. What the operator adds is the ability
+# to *declare* a job as YAML — which means retries, dependencies, scheduling and, most
+# importantly, that ArgoCD can manage a Spark job like any other resource.
+---
+apiVersion: sparkoperator.k8s.io/v1beta2
+kind: SparkApplication
+metadata:
+  name: spark-pi
+  namespace: spark
+spec:
+  type: Scala
+  # cluster mode: the driver runs as a pod inside the cluster and creates the executor
+  # pods itself. In client mode the driver would run wherever you launched it from,
+  # which is fine for a notebook and wrong for a scheduled job.
+  mode: cluster
+  image: spark:3.5.3
+  imagePullPolicy: IfNotPresent
+  mainClass: org.apache.spark.examples.SparkPi
+  # local:// means "already inside the image". The alternatives are s3a:// or https://,
+  # where the operator downloads the jar before starting the driver.
+  mainApplicationFile: "local:///opt/spark/examples/jars/spark-examples.jar"
+  sparkVersion: "3.5.3"
+  arguments:
+    - "100"
+  restartPolicy:
+    # Never: this is a batch job — it has an end, and finishing is success.
+    # A streaming job would use `Always`, because a streaming job never "completes":
+    # if it stops, that is a failure and it must come back.
+    type: Never
+  driver:
+    cores: 1
+    memory: 1g
+    # The anchor point for IRSA on EKS: annotate this ServiceAccount with an IAM role
+    # ARN and the job reads S3 with temporary STS credentials, no static secrets.
+    # It also needs API permissions to create the executor pods.
+    serviceAccount: spark-operator-spark
+  executor:
+    cores: 1
+    instances: 2
+    memory: 1g
