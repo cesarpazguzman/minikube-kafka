@@ -1,0 +1,31 @@
+# An ArgoCD Application: "keep namespace lab identical to manifests/ on main".
+#
+# Note this object is itself a CRD instance — ArgoCD is an operator like Strimzi and the
+# Spark operator. Same reconciliation loop, different domain: instead of reconciling a
+# Kafka cluster against a spec, it reconciles the whole cluster against a Git repo.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: lab-app
+  # Applications live in the argocd namespace, not in the namespace they deploy to.
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/cesarpazguzman/minikube-kafka.git
+    targetRevision: main
+    path: manifests
+  destination:
+    # "the cluster ArgoCD itself runs in". ArgoCD can drive many remote clusters from
+    # one control cluster, which is the usual production topology.
+    server: https://kubernetes.default.svc
+    namespace: lab
+  syncPolicy:
+    automated:
+      # prune: delete resources that disappear from Git. Without it, removing a file
+      # leaves the object orphaned in the cluster forever. Only resources ArgoCD
+      # created are ever pruned — unrelated objects in the namespace are untouched.
+      prune: true
+      # selfHeal: revert manual changes made against the cluster. This is what turns
+      # Git from "the deployment method" into "the source of truth".
+      selfHeal: true
